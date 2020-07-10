@@ -304,16 +304,16 @@ class TestCore(unittest.TestCase):
             "No features in the feature table are present as tips in the tree."
         ):
             Empress(self.tree, self.unrelated_table, self.sample_metadata,
-                        filter_unobserved_features_from_phylogeny=False)
+                    filter_unobserved_features_from_phylogeny=False)
         # Check that --p-filter-unobserved-features-from-phylogeny doesn't
-        # override this: the data mismatch should be identified before attempting
-        # shearing
+        # override this: the data mismatch should be identified before
+        # attempting shearing
         with self.assertRaisesRegex(
             tools.DataMatchingError,
             "No features in the feature table are present as tips in the tree."
         ):
             Empress(self.tree, self.unrelated_table, self.sample_metadata,
-                        filter_unobserved_features_from_phylogeny=True)
+                    filter_unobserved_features_from_phylogeny=True)
 
 
 # How data should look like when converted to a dict
