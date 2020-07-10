@@ -11,7 +11,7 @@ import pandas as pd
 import skbio
 from skbio import TreeNode
 from empress import taxonomy_utils
-from empress.tree import bp_tree_tips, bp_tree_non_tips
+import numpy as np
 
 
 class DataMatchingError(Exception):
@@ -22,12 +22,12 @@ class DataMatchingWarning(Warning):
     pass
 
 
-def fill_missing_node_names(tree):
+def fill_missing_node_names(bp_tree):
     """ Names nodes in the tree without a name.
 
      Parameters
      ----------
-     tree : skbio.TreeNode or empress.Tree
+     bp_tree : bp.Tree
         Input tree with potentially unnamed nodes (i.e. nodes' .name attributes
         can be None).
 
@@ -37,11 +37,16 @@ def fill_missing_node_names(tree):
         Tree with all nodes assigned a name.
     """
     current_unlabeled_node = 0
-    for n in tree.postorder(include_self=True):
-        if n.name is None:
+    new_names = np.full(bp_tree.B.size, None, dtype=object)
+
+    for node_idx in bp_tree.postorder(include_self=True):
+        if bp_tree.name(node_idx) is None:
             new_name = 'EmpressNode{}'.format(current_unlabeled_node)
-            n.name = new_name
+            new_names[node_idx] = new_name
             current_unlabeled_node += 1
+        else:
+            new_names[node_idx] = bp_tree.name(node_idx)
+    bp_tree.set_names(new_names)
 
 
 def read(file_name, file_format='newick'):
@@ -145,7 +150,7 @@ def match_inputs(
     # Match table and tree.
     # (Ignore None-named tips in the tree, which will be replaced later on
     # with "default" names like "EmpressNode0".)
-    tip_names = set(bp_tree_tips(bp_tree))
+    tip_names = set(bp_tree.bp_tree_tips())
     tree_and_table_features = table.index.intersection(tip_names)
 
     if len(tree_and_table_features) == 0:
@@ -260,7 +265,7 @@ def match_inputs(
         tip_metadata = ts_feature_metadata.loc[fm_and_tip_features]
 
         # Subset internal node metadata
-        internal_node_names = set(bp_tree_non_tips(bp_tree))
+        internal_node_names = set(bp_tree.bp_tree_non_tips())
         fm_and_int_features = fm_ids.intersection(internal_node_names)
         int_metadata = ts_feature_metadata.loc[fm_and_int_features]
 

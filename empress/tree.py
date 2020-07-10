@@ -9,13 +9,14 @@
 import warnings
 from skbio import TreeNode
 import numpy as np
+from bp import BP, from_skbio_treenode
 
 
 class TreeFormatWarning(Warning):
     pass
 
 
-class Tree(TreeNode):
+class Tree:
     """
     Attributes
     ----------
@@ -32,20 +33,44 @@ class Tree(TreeNode):
     `depth` is the number of nodes found in the longest path.
     """
 
-    def __init__(self, use_lengths=False, **kwargs):
+    def __init__(self, bp_tree):
         """ Constructs a Dendrogram object for visualization.
 
         Parameters
         ----------
-        use_lengths: bool
-            Specifies if the branch lengths should be included in the
-            resulting visualization (default True).
+        bp_tree: bp.BP
+            BP tree object
 
         Returns
         -------
 
         """
-        super().__init__(**kwargs)
+        self.bp_tree = bp_tree
+        self.B = self.bp_tree.B
+        self.leafcounts = np.zeros(self.B.size, np.int)
+        self.depths = np.zeros(self.B.size, np.double)
+        self.heights = np.zeros(self.B.size, np.double)
+        self.yr = np.zeros(self.B.size, np.double)
+        self.xr = np.zeros(self.B.size, np.double)
+        self.highest_child_yr = np.zeros(self.B.size, np.float)
+        self.lowest_child_yr = np.zeros(self.B.size, np.float)
+        self.clangle = np.zeros(self.B.size, np.double)
+        self.clradius = np.zeros(self.B.size, np.double)
+        self.xc0 = np.zeros(self.B.size, np.double)
+        self.yc0 = np.zeros(self.B.size, np.double)
+        self.xc1 = np.zeros(self.B.size, np.double)
+        self.yc1 = np.zeros(self.B.size, np.double)
+        self.highest_child_clangle = np.zeros(self.B.size, np.float)
+        self.lowest_child_clangle = np.zeros(self.B.size, np.float)
+        self.arcx0 = np.zeros(self.B.size, np.double)
+        self.arcy0 = np.zeros(self.B.size, np.double)
+        self.arcx1 = np.zeros(self.B.size, np.double)
+        self.arcy1 = np.zeros(self.B.size, np.double)
+        self.x1 = np.zeros(self.B.size, np.double)
+        self.y1 = np.zeros(self.B.size, np.double)
+        self.x2 = np.zeros(self.B.size, np.double)
+        self.y2 = np.zeros(self.B.size, np.double)
+        self.angle = np.zeros(self.B.size, np.double)
         self.childRem = -1
 
     @classmethod
@@ -61,10 +86,11 @@ class Tree(TreeNode):
             the geometry calculations for visualization.
         Returns
         -------
-        Tree
+        Tree: bp.BP
 
         """
-        if tree.count() <= 1:
+        bp_tree = from_skbio_treenode(tree)
+        if sum(bp_tree.B) <= 1:
             raise ValueError("Tree must contain at least 2 nodes.")
 
         # While traversing the tree, record tip / internal node names
@@ -73,43 +99,44 @@ class Tree(TreeNode):
         tip_names = []
         internal_node_names = []
         max_branch_length = 0
-        for n in tree.postorder(include_self=False):
-            if n.name is not None:
+        for i in range(sum(bp_tree.B)):
+            node_idx = bp_tree.postorderselect(i)
+            name = bp_tree.name(node_idx)
+            length = bp_tree.length(node_idx)
+            if name is not None:
                 # NOTE: This should eventually be taken out when
                 # fill_missing_node_names() is refactored. However, for now,
                 # this makes sure that users can't accidentally break things by
                 # naming nodes identical to our default names for missing nodes
-                if n.name.startswith("EmpressNode"):
+                if name.startswith("EmpressNode"):
                     raise ValueError(
                         'Node names can\'t start with "EmpressNode".'
                     )
-                if n.is_tip():
-                    tip_names.append(n.name)
+                if bp_tree.isleaf(node_idx):
+                    tip_names.append(name)
                 else:
-                    internal_node_names.append(n.name)
-            if n.length is None:
+                    internal_node_names.append(name)
+            if length is None:
                 raise ValueError(
                     "Non-root branches of the tree must have lengths."
                 )
-
-            if n.length < 0:
+            if length < 0:
                 raise ValueError(
                     "Non-root branches of the tree must have nonnegative "
                     "lengths."
                 )
-            max_branch_length = max(n.length, max_branch_length)
+
+            max_branch_length = max(length, max_branch_length)
 
         # We didn't consider the root node in the above traversal since we
         # don't care about its length. However, we do care about its name,
         # so we add the root's name to internal_node_names.
-        internal_node_names.append(tree.name)
 
         if max_branch_length == 0:
             raise ValueError(
                 "At least one non-root branch of the tree must have a "
                 "positive length."
             )
-
         unique_tip_name_set = set(tip_names)
         if len(unique_tip_name_set) != len(tip_names):
             raise ValueError("Tip names in the tree must be unique.")
@@ -126,13 +153,63 @@ class Tree(TreeNode):
                 "Internal node names in the tree are not unique.",
                 TreeFormatWarning
             )
+        bp_tree.__class__ = Tree
+        bp_tree.update_geometry(use_lengths)
+        return bp_tree
 
-        for n in tree.postorder():
-            n.__class__ = Tree
-            n.tip_count = 0
+    def postorder(self, include_self=True):
+        e = sum(self.B) if include_self else sum(self.B) - 1
+        for i in range(e):
+            node_idx = self.bp_tree.postorderselect(i)
+            yield node_idx
 
-        tree.update_geometry(use_lengths)
-        return tree
+    def preorder(self, include_self=True):
+        s = 0 if include_self else 1
+        for i in range(s, sum(self.B)):
+            node_idx = self.bp_tree.postorderselect(i)
+            yield node_idx
+
+    def bp_tree_tips(self):
+        """ Extracts tip names in the tree, ignoring unnamed tips.
+
+        Parameters
+        ----------
+        bp_tree : bp.BP
+            Input BP tree
+        Returns
+        -------
+        tips : list of strings
+            list of tip names in the tree
+        """
+        tips = []
+        # Iterate through all open and closing parentheses and extract tip names
+        for i in range(self.B.size):
+            pos_name = self.bp_tree.name(i)
+            # Check if this is a leaf node with a label
+            if self.isleaf(i) and (pos_name is not None):
+                tips.append(pos_name)
+        return tips
+
+    def bp_tree_non_tips(self):
+        """ Extracts internal node names in the tree, ignoring unnamed nodes.
+
+           Parameters
+           ----------
+           bp_tree : bp.BP
+               Input BP tree
+           Returns
+           -------
+           non_tips : list of strings
+               list of internal node names in the tree
+        """
+        non_tips = []
+        for i in range(self.B.size):
+            pos_name = self.bp_tree.name(i)
+            # Check if this is an opening parenthesis, is not a leaf, and
+            # has a node label
+            if self.B[i] and not self.isleaf(i) and pos_name is not None:
+                non_tips.append(pos_name)
+        return non_tips
 
     def update_geometry(self, use_lengths, depth=None):
         """Calculate tree node attributes such as height and depth.
@@ -147,29 +224,38 @@ class Tree(TreeNode):
             This is agnostic to scale and orientation.
 
         """
-        # i = 0
-        for node in self.postorder():
-            # node.name = i
-            # i += 1
-            if node.length is None or not use_lengths:
+        new_heights = np.zeros(self.B.size, dtype=np.double)
+        new_leaf_count = np.zeros(self.B.size, dtype=np.int)
+        new_depths = np.zeros(self.B.size, dtype=np.double)
+        for node_idx in self.postorder():
+            length = self.bp_tree.length(node_idx)
+            if length is None or not use_lengths:
                 if not use_lengths:
-                    if node.is_tip():
-                        node.length = 5
+                    if self.isleaf(node_idx):
+                        length = 5
                     else:
-                        node.length = 1
+                        length = 1
                 else:
-                    node.length = 0
+                    length = 0
+            new_depths[node_idx] = (depth or 0) + length
 
-            node.depth = (depth or 0) + node.length
-
-            children = node.children
-            if children:
-                node.height = max([c.height for c in children]) + node.length
-                node.leafcount = sum([c.leafcount for c in children])
-
+            if self.isleaf(node_idx):
+                new_heights[node_idx] = length
+                new_leaf_count[node_idx] = 1
             else:
-                node.height = node.length
-                node.leafcount = 1
+                idx = self.bp_tree.fchild(node_idx)
+                height = 0
+                leafcount = 0
+                while idx:
+                    height = max(height, new_heights[idx])
+                    leafcount += new_leaf_count[idx]
+                    idx = self.bp_tree.nsibling(idx)
+                height += length
+                new_heights[node_idx] = height
+                new_leaf_count[node_idx] = leafcount
+        self.leafcounts = new_leaf_count
+        self.heights = new_heights
+        self.depths = new_depths
 
     def coords(self, height, width):
         """ Computes the coordinates of nodes to be rendered in plot.
@@ -224,16 +310,16 @@ class Tree(TreeNode):
         # for this vertical line shouldn't show up. I don't think this should
         # cause any problems, but it may be worth detecting these cases and not
         # drawing vertical lines for them in the future.
-        for n in self.preorder():
-            if not n.is_tip():
+        for node_idx in self.preorder():
+            if not self.isleaf(node_idx):
                 # wow, child does not look like a word any more
-                n.highest_child_yr = float("-inf")
-                n.lowest_child_yr = float("inf")
-                for c in n.children:
-                    if c.yr > n.highest_child_yr:
-                        n.highest_child_yr = c.yr
-                    if c.yr < n.lowest_child_yr:
-                        n.lowest_child_yr = c.yr
+                self.highest_child_yr[node_idx] = float("-inf")
+                self.lowest_child_yr[node_idx] = float("inf")
+                for c_idx in self.children(node_idx):
+                    if self.yr[c_idx] > self.highest_child_yr[node_idx]:
+                        self.highest_child_yr[node_idx] = self.yr[c_idx]
+                    if self.yr[c_idx] < self.lowest_child_yr[node_idx]:
+                        self.lowest_child_yr[node_idx] = self.yr[c_idx]
 
         return layout_to_coordsuffix, default_layout
 
@@ -257,17 +343,46 @@ class Tree(TreeNode):
         xname = "x" + suffix
         yname = "y" + suffix
 
-        centerX = getattr(self, xname)
-        centerY = getattr(self, yname)
+        centersX = getattr(self, xname)
+        centersY = getattr(self, yname)
 
-        for node in self.postorder():
+        centerX = centersX[0]
+        centerY = centersY[0]
+
+        for node_idx in self.postorder():
             # This code might look sort of intimidating, but it's really just
             # another way to write out:
             #     node.x2 = node.x2 - centerX
             #     node.y2 = node.y2 - centerY
             # ...when we don't know what "x2" or "y2" will be named beforehand.
-            setattr(node, xname, getattr(node, xname) - centerX)
-            setattr(node, yname, getattr(node, yname) - centerY)
+            centersX[node_idx] = centersX[node_idx] - centerX
+            centersY[node_idx] = centersY[node_idx] - centerY
+        setattr(self, xname, centersX)
+        setattr(self, yname, centersY)
+
+    def isleaf(self, i):
+        """ Checks if node at position i belongs to a leaf node or not
+
+            Parameters
+           ----------
+           bp_tree : bp.BP
+               Input BP tree
+            i : int
+               The query node index
+           Returns
+           -------
+           bool
+               True if this is a leaf node, False otherwise
+        """
+        return self.B[i] and (not self.B[i + 1])
+
+    def children(self, i):
+        children = []
+        child = self.bp_tree.fchild(i)
+        while child > 0:
+            children.append(child)
+            child = self.bp_tree.nsibling(child)
+        return children
 
     def layout_rectangular(self, width, height):
         """ Rectangular layout.
@@ -308,23 +423,26 @@ class Tree(TreeNode):
         max_width = 0
         max_height = 0
         prev_y = 0
-        for n in self.postorder():
-            if n.is_tip():
-                n.yr = prev_y
+        for node_idx in self.postorder():
+            if self.isleaf(node_idx):
+
+                self.yr[node_idx] = prev_y
                 prev_y += 1
-                if n.yr > max_height:
-                    max_height = n.yr
+                if self.yr[node_idx] > max_height:
+                    max_height = self.yr[node_idx]
             else:
                 # Center internal nodes above their children
                 # We could also center them above their tips, but (IMO) this
                 # looks better ;)
-                n.yr = sum([c.yr for c in n.children]) / len(n.children)
+                children = self.children(node_idx)
+                self.yr[node_idx] = sum([self.yr[c_idx] for
+                                         c_idx in children]) / len(children)
 
-        self.xr = 0
-        for n in self.preorder(include_self=False):
-            n.xr = n.parent.xr + n.length
-            if n.xr > max_width:
-                max_width = n.xr
+        for node_idx in self.preorder(include_self=False):
+            self.xr[node_idx] = self.xr[self.bp_tree.parent(node_idx)] + \
+                                self.bp_tree.length(node_idx)
+            if self.xr[node_idx] > max_width:
+                max_width = self.xr[node_idx]
 
         # We don't check if max_width == 0 here, because we check when
         # constructing an Empress tree that it has at least one positive
@@ -345,9 +463,9 @@ class Tree(TreeNode):
             # every node's y-coordinate at 0.
             y_scaling_factor = 1
 
-        for n in self.preorder():
-            n.xr *= x_scaling_factor
-            n.yr *= y_scaling_factor
+        for node_idx in self.preorder():
+            self.xr[node_idx] *= x_scaling_factor
+            self.yr[node_idx] *= y_scaling_factor
 
         # Now we have the layout! In the JS we'll need to draw each internal
         # node as a vertical line ranging from its lowest child y-position to
@@ -404,23 +522,25 @@ class Tree(TreeNode):
             Description above + the implementation of this algorithm
             derived from the Polar layout algorithm code.
         """
-        anglepernode = (2 * np.pi) / self.leafcount
+        anglepernode = (2 * np.pi) / self.leafcounts[0]
         prev_clangle = 0
-        for n in self.postorder():
-            if n.is_tip():
-                n.clangle = prev_clangle
+        for node_idx in self.postorder():
+            if self.isleaf(node_idx):
+                self.clangle[node_idx] = prev_clangle
                 prev_clangle += anglepernode
             else:
                 # Center internal nodes at an angle above their children
-                child_clangle_sum = sum([c.clangle for c in n.children])
-                n.clangle = child_clangle_sum / len(n.children)
+                children = self.children(node_idx)
+                child_clangle_sum = sum([self.clangle[c_idx] for c_idx
+                                         in children])
+                self.clangle[node_idx] = child_clangle_sum / len(children)
 
         max_clradius = 0
-        self.clradius = 0
-        for n in self.preorder(include_self=False):
-            n.clradius = n.parent.clradius + n.length
-            if n.clradius > max_clradius:
-                max_clradius = n.clradius
+        for node_idx in self.preorder(include_self=False):
+            self.clradius[node_idx] = self.clradius[self.bp_tree.parent(node_idx)] + \
+                                      self.bp_tree.length(node_idx)
+            if self.clradius[node_idx] > max_clradius:
+                max_clradius = self.clradius[node_idx]
 
         # Now that we have the polar coordinates of the nodes, convert these
         # coordinates to normal x/y coordinates.
@@ -433,32 +553,38 @@ class Tree(TreeNode):
         # this in python.
         max_x = max_y = float("-inf")
         min_x = min_y = float("inf")
-        for n in self.postorder():
-            n.xc1 = n.clradius * np.cos(n.clangle)
-            n.yc1 = n.clradius * np.sin(n.clangle)
-            if n.is_root():
+        for node_idx in self.postorder():
+            self.xc1[node_idx] = self.clradius[node_idx] * \
+                                 np.cos(self.clangle[node_idx])
+            self.yc1[node_idx] = self.clradius[node_idx] * \
+                                 np.sin(self.clangle[node_idx])
+            if self.isleaf(node_idx):
                 # NOTE that the root has a clradius of 0 (since it's just
                 # represented as a point at the center of the layout). We don't
                 # even bother drawing the root in the Empress JS code, but for
                 # the purposes of alter_coordinates_relative_to_root() we need
                 # to explicitly position the root at (0, 0).
-                n.xc0 = 0
-                n.yc0 = 0
+                self.xc0[node_idx] = 0
+                self.yc0[node_idx] = 0
             else:
-                n.xc0 = n.parent.clradius * np.cos(n.clangle)
-                n.yc0 = n.parent.clradius * np.sin(n.clangle)
+                self.xc0[node_idx] = self.clradius[
+                                         self.bp_tree.parent(node_idx)] *\
+                                     np.cos(self.clangle[node_idx])
+                self.yc0[node_idx] = self.clradius[
+                                         self.bp_tree.parent(node_idx)] *\
+                                     np.sin(self.clangle[node_idx])
             # NOTE: We don't bother testing the xc0 / yc0 coordinates as
             # "extrema" because they should always be further "within" the
             # tree than the xc1 / yc1 coordinates.
             # TODO: verify that the "tree is a line" case doesn't mess this up.
-            if n.xc1 > max_x:
-                max_x = n.xc1
-            if n.yc1 > max_y:
-                max_y = n.yc1
-            if n.xc1 < min_x:
-                min_x = n.xc1
-            if n.yc1 < min_y:
-                min_y = n.yc1
+            if self.xc1[node_idx] > max_x:
+                max_x = self.xc1[node_idx]
+            if self.yc1[node_idx] > max_y:
+                max_y = self.yc1[node_idx]
+            if self.xc1[node_idx] < min_x:
+                min_x = self.xc1[node_idx]
+            if self.yc1[node_idx] < min_y:
+                min_y = self.yc1[node_idx]
 
         # TODO: raise error if the maximum and minimum are same for x or y.
         # may happen if the tree is a straight line.
@@ -467,24 +593,28 @@ class Tree(TreeNode):
         # normalize the coordinate based on the largest dimension
         width_scale = width / (max_x - min_x)
         height_scale = height / (max_y - min_y)
-        scale_factor = width_scale if width_scale > height_scale else\
+        scale_factor = width_scale if width_scale > height_scale else \
             height_scale
         x_scaling_factor = scale_factor
         y_scaling_factor = scale_factor
 
-        for n in self.preorder():
-            n.xc0 *= x_scaling_factor
-            n.yc0 *= y_scaling_factor
-            n.xc1 *= x_scaling_factor
-            n.yc1 *= y_scaling_factor
-            if not n.is_tip() and not n.is_root():
-                n.highest_child_clangle = float("-inf")
-                n.lowest_child_clangle = float("inf")
-                for c in n.children:
-                    if c.clangle > n.highest_child_clangle:
-                        n.highest_child_clangle = c.clangle
-                    if c.clangle < n.lowest_child_clangle:
-                        n.lowest_child_clangle = c.clangle
+        for node_idx in self.preorder():
+            self.xc0[node_idx] *= x_scaling_factor
+            self.yc0[node_idx] *= y_scaling_factor
+            self.xc1[node_idx] *= x_scaling_factor
+            self.yc1[node_idx] *= y_scaling_factor
+            if not self.isleaf(node_idx) and (node_idx != 0):
+                self.highest_child_clangle[node_idx] = float("-inf")
+                self.lowest_child_clangle[node_idx] = float("inf")
+                for c_idx in self.children(node_idx):
+                    if self.clangle[c_idx] >\
+                            self.highest_child_clangle[node_idx]:
+                        self.highest_child_clangle[node_idx] =\
+                            self.clangle[c_idx]
+                    if self.clangle[c_idx] < \
+                            self.lowest_child_clangle[node_idx]:
+                        self.lowest_child_clangle[node_idx] =\
+                            self.clangle[c_idx]
                 # Figure out "arc" endpoints for the circular layout
                 # NOTE: As with the "vertical lines" for internal nodes in the
                 # rectangular layout, these arcs will be drawn for nodes with
@@ -493,14 +623,22 @@ class Tree(TreeNode):
                 # so arcx0 would equal arcx1 and arcy0 would equal arcy1. So
                 # nothing should show up (but it may be worth addressing this
                 # in the future).
-                n.arcx0 = n.clradius * np.cos(n.highest_child_clangle)
-                n.arcy0 = n.clradius * np.sin(n.highest_child_clangle)
-                n.arcx1 = n.clradius * np.cos(n.lowest_child_clangle)
-                n.arcy1 = n.clradius * np.sin(n.lowest_child_clangle)
-                n.arcx0 *= x_scaling_factor
-                n.arcy0 *= y_scaling_factor
-                n.arcx1 *= x_scaling_factor
-                n.arcy1 *= y_scaling_factor
+                self.arcx0[node_idx] = self.clradius[node_idx] * \
+                                       np.cos(
+                                           self.highest_child_clangle[node_idx])
+                self.arcy0[node_idx] = self.clradius[node_idx] * \
+                                       np.sin(
+                                           self.highest_child_clangle[node_idx])
+                self.arcx1[node_idx] = self.clradius[node_idx] * \
+                                       np.cos(
+                                           self.lowest_child_clangle[node_idx])
+                self.arcy1[node_idx] = self.clradius[node_idx] * \
+                                       np.sin(
+                                           self.lowest_child_clangle[node_idx])
+                self.arcx0[node_idx] *= x_scaling_factor
+                self.arcy0[node_idx] *= y_scaling_factor
+                self.arcx1[node_idx] *= x_scaling_factor
+                self.arcy1[node_idx] *= y_scaling_factor
 
         return "Circular", "c1"
 
@@ -532,7 +670,7 @@ class Tree(TreeNode):
         # Recall that 360 degrees is equal to (2 * pi) radians.
         # You can think of this variable as "the maximum angle we can 'give' to
         # each leaf of the tree".
-        angle = (2 * np.pi) / self.leafcount
+        angle = (2 * np.pi) / self.leafcounts[0]
 
         best_scale = 0
         for i in range(60):
@@ -600,99 +738,39 @@ class Tree(TreeNode):
 
         # calculates self coords/angle
         # Constant angle algorithm.  Should add maximum daylight step.
-        x2 = x1 + self.length * s * np.sin(a)
-        y2 = y1 + self.length * s * np.cos(a)
-        (self.x1, self.y1, self.x2, self.y2, self.angle) = (x1, y1, x2, y2,
-                                                            a)
-        nodes = [node for node in self.postorder(include_self=False)]
-        nodes.reverse()
+        x2 = x1 + self.bp_tree.length(0) * s * np.sin(a)
+        y2 = y1 + self.bp_tree.length(0) * s * np.cos(a)
+        (self.x1[0], self.y1[0], self.x2[0], self.y2[0], self.angle[0]) = \
+            (x1, y1, x2, y2, a)
+        node_indices = [node_idx for node_idx in
+                        self.postorder(include_self=False)]
+        node_indices.reverse()
         # for node in self.preorder(include_self=False):
-        for node in nodes:
-            x1 = node.parent.x2
-            y1 = node.parent.y2
+        for node_idx in node_indices:
+            x1 = self.x2[self.bp_tree.parent(node_idx)]
+            y1 = self.y2[self.bp_tree.parent(node_idx)]
 
             # init a
-            a = node.parent.angle
+            a = self.angle[self.bp_tree.parent(node_idx)]
 
             # same modify across nodes
-            a = a - node.parent.leafcount * da / 2
+            a = a - self.leafcounts[self.bp_tree.parent(node_idx)] * da / 2
 
             # check for conditional higher order
-            for sib in node.parent.children:
-                if sib != node:
-                    a += sib.leafcount * da
+            for sib_idx in self.children(self.bp_tree.parent(node_idx)):
+                if sib_idx != node_idx:
+                    a += self.leafcounts[sib_idx] * da
                 else:
-                    a += (node.leafcount * da) / 2
+                    a += (self.leafcounts[node_idx] * da) / 2
                     break
 
             # Constant angle algorithm.  Should add maximum daylight step.
-            x2 = x1 + node.length * s * np.sin(a)
-            y2 = y1 + node.length * s * np.cos(a)
-            (node.x1, node.y1, node.x2, node.y2, node.angle) = (x1, y1, x2,
-                                                                y2, a)
+            x2 = x1 + self.bp_tree.length(node_idx) * s * np.sin(a)
+            y2 = y1 + self.bp_tree.length(node_idx) * s * np.cos(a)
+            (self.x1[node_idx], self.y1[node_idx], self.x2[node_idx],
+             self.y2[node_idx], self.angle[node_idx]) = (x1, y1, x2, y2, a)
 
             max_x, min_x = max(max_x, x2), min(min_x, x2)
             max_y, min_y = max(max_y, y2), min(min_y, y2)
 
         return (max_x, min_x, max_y, min_y)
-
-
-def bp_tree_tips(bp_tree):
-    """ Extracts tip names in the tree, ignoring unnamed tips.
-
-    Parameters
-    ----------
-    bp_tree : bp.BP
-        Input BP tree
-    Returns
-    -------
-    tips : list of strings
-        list of tip names in the tree
-    """
-    tips = []
-    # Iterate through all open and closing parentheses and extract tip names
-    for i in range(bp_tree.B.size):
-        pos_name = bp_tree.name(i)
-        # Check if this is a leaf node with a label
-        if isleaf(bp_tree, i) and (pos_name is not None):
-            tips.append(pos_name)
-    return tips
-
-
-def bp_tree_non_tips(bp_tree):
-    """ Extracts internal node names in the tree, ignoring unnamed nodes.
-
-       Parameters
-       ----------
-       bp_tree : bp.BP
-           Input BP tree
-       Returns
-       -------
-       non_tips : list of strings
-           list of internal node names in the tree
-    """
-    non_tips = []
-    for i in range(bp_tree.B.size):
-        pos_name = bp_tree.name(i)
-        # Check if this is an opening parenthesis, is not a leaf, and
-        # has a node label
-        if bp_tree.B[i] and not isleaf(bp_tree, i) and pos_name is not None:
-            non_tips.append(pos_name)
-    return non_tips
-
-
-def isleaf(bp_tree, i):
-    """ Checks if node at position i belongs to a leaf node or not
-
-        Parameters
-       ----------
-       bp_tree : bp.BP
-           Input BP tree
-        i : int
-           The query node index
-       Returns
-       -------
-       bool
-           True if this is a leaf node, False otherwise
-    """
-    return bp_tree.B[i] and (not bp_tree.B[i + 1])

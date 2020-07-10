@@ -134,18 +134,19 @@ class Empress():
         # the columns describe feature IDs. We transpose this table before
         # sending it to tools.match_inputs() and keep using the transposed
         # table for the rest of this visualizer.
+        self.tree = Tree(self.tree)
+
         self.table, self.samples, self.tip_md, self.int_md = match_inputs(
             self.tree, self.table.T, self.samples, self.features,
             ignore_missing_samples, filter_missing_features
         )
         # remove unobserved features from the phylogeny
         if filter_unobserved_features_from_phylogeny:
-            self.tree = self.tree.shear(set(self.table.index))
+            self.tree.bp_tree = self.tree.bp_tree.shear(set(self.table.index))
 
         # extract balance parenthesis
         self._bp_tree = list(self.tree.B)
 
-        self.tree = Tree.from_tree(to_skbio_treenode(self.tree))
         fill_missing_node_names(self.tree)
 
     def copy_support_files(self, target=None):
@@ -218,9 +219,9 @@ class Empress():
 
         tree_data = {}
         names_to_keys = {}
-        for i, node in enumerate(self.tree.postorder(include_self=True), 1):
-            tree_data[i] = {
-                'name': node.name,
+        for node_idx in self.tree.postorder(include_self=True):
+            tree_data[node_idx] = {
+                'name': self.tree.name(node_idx),
                 'color': [0.75, 0.75, 0.75],
                 'sampVal': 1,
                 'visible': True,
@@ -230,34 +231,38 @@ class Empress():
             for layoutsuffix in layout_to_coordsuffix.values():
                 xcoord = "x" + layoutsuffix
                 ycoord = "y" + layoutsuffix
-                tree_data[i][xcoord] = getattr(node, xcoord)
-                tree_data[i][ycoord] = getattr(node, ycoord)
+                tree_data[node_idx][xcoord] =\
+                    getattr(self.tree, xcoord)[node_idx]
+                tree_data[node_idx][ycoord] =\
+                    getattr(self.tree, ycoord)[node_idx]
             # Hack: it isn't mentioned above, but we need start pos info for
             # circular layout. The start pos for the other layouts is the
             # parent xy coordinates so we need only need to specify the start
             # for circular layout.
-            tree_data[i]["xc0"] = node.xc0
-            tree_data[i]["yc0"] = node.yc0
+            tree_data[node_idx]["xc0"] = self.tree.xc0[node_idx]
+            tree_data[node_idx]["yc0"] = self.tree.yc0[node_idx]
 
             # Also add vertical bar coordinate info for the rectangular layout,
             # and start point & arc coordinate info for the circular layout
-            if not node.is_tip():
-                tree_data[i]["highestchildyr"] = node.highest_child_yr
-                tree_data[i]["lowestchildyr"] = node.lowest_child_yr
-                if not node.is_root():
-                    tree_data[i]["arcx0"] = node.arcx0
-                    tree_data[i]["arcy0"] = node.arcy0
-                    tree_data[i]["arcstartangle"] = node.highest_child_clangle
-                    tree_data[i]["arcendangle"] = node.lowest_child_clangle
+            if not self.tree.isleaf(node_idx):
+                tree_data[node_idx]["highestchildyr"] = self.tree.highest_child_yr[node_idx]
+                tree_data[node_idx]["lowestchildyr"] = self.tree.lowest_child_yr[node_idx]
+                if not self.tree.isleaf(node_idx):
+                    tree_data[node_idx]["arcx0"] = self.tree.arcx0[node_idx]
+                    tree_data[node_idx]["arcy0"] = self.tree.arcy0[node_idx]
+                    tree_data[node_idx]["arcstartangle"] = \
+                        self.tree.highest_child_clangle[node_idx]
+                    tree_data[node_idx]["arcendangle"] = \
+                        self.tree.lowest_child_clangle[node_idx]
 
-            if node.name in names_to_keys:
-                names_to_keys[node.name].append(i)
+            if self.tree.name(node_idx) in names_to_keys:
+                names_to_keys[self.tree.name(node_idx)].append(node_idx)
             else:
-                names_to_keys[node.name] = [i]
+                names_to_keys[self.tree.name(node_idx)] = [node_idx]
 
         names = []
-        for node in self.tree.preorder(include_self=True):
-            names.append(node.name)
+        for node_idx in self.tree.preorder(include_self=True):
+            names.append(self.tree.name(node_idx))
 
         # Convert sample metadata to a JSON-esque format
         sample_data = self.samples.to_dict(orient='index')

@@ -26,9 +26,9 @@ class TestTree(unittest.TestCase):
         self.assertEqual(t.__class__, Tree)
         # Check that trees match by iterating over original and Empress trees
         # simultaneously: see https://stackoverflow.com/a/20910242/10730311
-        for n1, n2 in zip(t.preorder(), self.tree.preorder()):
-            self.assertEqual(n1.name, n2.name)
-            self.assertEqual(n1.length, n2.length)
+        for n1_index, n2_index in zip(t.preorder(), self.tree.preorder()):
+            self.assertEqual(t.name(n1_index), self.tree.name(n2_index))
+            self.assertEqual(t.length(n1_index), self.tree.length(n1_index))
 
     def test_from_tree_singlenode(self):
         st = TreeNode.read(['i:1;'])
