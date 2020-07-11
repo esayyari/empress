@@ -166,7 +166,7 @@ class Tree:
     def preorder(self, include_self=True):
         s = 0 if include_self else 1
         for i in range(s, sum(self.B)):
-            node_idx = self.bp_tree.postorderselect(i)
+            node_idx = self.bp_tree.preorderselect(i)
             yield node_idx
 
     def bp_tree_tips(self):

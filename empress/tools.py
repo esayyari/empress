@@ -22,7 +22,7 @@ class DataMatchingWarning(Warning):
     pass
 
 
-def fill_missing_node_names(bp_tree):
+def fill_missing_node_names(tree):
     """ Names nodes in the tree without a name.
 
      Parameters
@@ -37,16 +37,16 @@ def fill_missing_node_names(bp_tree):
         Tree with all nodes assigned a name.
     """
     current_unlabeled_node = 0
-    new_names = np.full(bp_tree.B.size, None, dtype=object)
+    new_names = np.full(tree.B.size, None, dtype=object)
 
-    for node_idx in bp_tree.postorder(include_self=True):
-        if bp_tree.name(node_idx) is None:
+    for node_idx in tree.postorder(include_self=True):
+        if tree.bp_tree.name(node_idx) is None:
             new_name = 'EmpressNode{}'.format(current_unlabeled_node)
             new_names[node_idx] = new_name
             current_unlabeled_node += 1
         else:
-            new_names[node_idx] = bp_tree.name(node_idx)
-    bp_tree.set_names(new_names)
+            new_names[node_idx] = tree.bp_tree.name(node_idx)
+    tree.bp_tree.set_names(new_names)
 
 
 def read(file_name, file_format='newick'):
