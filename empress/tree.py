@@ -112,7 +112,7 @@ class Tree:
                     raise ValueError(
                         'Node names can\'t start with "EmpressNode".'
                     )
-                if bp_tree.isleaf(node_idx):
+                if isleaf(bp_tree, node_idx):
                     tip_names.append(name)
                 else:
                     internal_node_names.append(name)
@@ -153,7 +153,7 @@ class Tree:
                 "Internal node names in the tree are not unique.",
                 TreeFormatWarning
             )
-        bp_tree.__class__ = Tree
+        bp_tree = Tree(bp_tree)
         bp_tree.update_geometry(use_lengths)
         return bp_tree
 
@@ -774,3 +774,20 @@ class Tree:
             max_y, min_y = max(max_y, y2), min(min_y, y2)
 
         return (max_x, min_x, max_y, min_y)
+
+
+def isleaf(bp_tree, i):
+    """ Checks if node at position i belongs to a leaf node or not
+
+        Parameters
+       ----------
+       bp_tree : bp.BP
+           Input BP tree
+        i : int
+           The query node index
+       Returns
+       -------
+       bool
+           True if this is a leaf node, False otherwise
+    """
+    return bp_tree.B[i] and (not bp_tree.B[i + 1])
